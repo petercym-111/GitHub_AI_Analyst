@@ -57,12 +57,27 @@ class GitHubService:
         return await self._get( # call helper (Delegates to the reusable GET function.)
             f"/users/{username}/repos", # build URL to tells GitHub which resource you want (Example:"/users/octocat/repos")
             params={ # using query parameters here Because httpx.AsyncClient.get() supports it. httpx automatically builds: (Example:"/users/octocat/repos?page=2&per_page=30")
+                     # httpx expects query parameters to be grouped under the special keyword "params"
+                     # if you don't use "params" here, your _get() forwards arguments to: "self.client.get(...)" and httpx.AsyncClient.get() does not have parameters named page or per_page.
+                     # So eventually Python will raise: TypeError: AsyncClient.get() got an unexpected keyword argument 'page'
                 "page": page,
                 "per_page": per_page
             }
         )
+# -----------------------------
+# - How the params should behave -
+# Function definition:
+#     page: int = 1
+#
+# Function call:
+#     page=2
+#
+# HTTP query parameters:
+#     params={"page": 2}
+# -----------------------------
 
-# - Full execution flow -
+
+# - Full execution flow of this file -
 # Endpoint
 #     ↓
 # GitHubService.get_user_repos()
