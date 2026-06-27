@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 import httpx
 from contextlib import asynccontextmanager
+from groq import AsyncGroq
 
-from app.routes import github_endpoint as github
-
+from app.configurations.config import settings
+from app.routes import endpoints as github
+from app.routes import github_analysis_endpoint as analysis
 
 # In production standard, always keep main.py as minimal code as possible
 # If it grows beyond wiring/config → move code out
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI): # Defines a function that FastAPI will call to
                                   # This parameter(app: FastAPI) represents the running application instance
     # Startup Section
     app.state.http_client = httpx.AsyncClient( # This stores an HTTP client instance inside the FastAPI application state.
+                                     # httpx.AsyncClient（）单单是这个语法本身就已经是昂贵资源，并包含了（connection pool，tcp connection之类）。Bracket里的不一定需要是昂贵资源，这个语法也可以单独写
                                      # 'app.state' = 'engine + pool' stored here. A shared storage container attached to the FastAPI app instance. "global memory for this app instance for runtime use"
                                      # 'app.state.http_client' = "Attach this HTTP client to the application so all routes can reuse it"
                                      # 'httpx.AsyncClient' is an asynchronous HTTP client used to send outbound（出站) HTTP requests from your backend to external services (e.g., the GitHub API).
@@ -141,9 +144,11 @@ app = FastAPI(lifespan=lifespan)
 # startup → run code before yield
 # shutdown → run code after yield
 
-app.include_router(github.router, prefix="/github", tags=["GitHub"]) # Registers the router from github_endpoint into the main app. Takes all routes inside github.router
-# 'github.router' is an APIRouter instance defined in your route file (github_endpoint).
-# 'prefix="/github"' = Adds a URL prefix to all routes inside that router. Every endpoint path will have the word 'github' prepended
+app.include_router(analysis.router, prefix="/github", tags=["GitHub"])
+app.include_router(github.router, prefix="/github", tags=["GitHub"])
+# Registers the router from endpoints.py into the main app. Takes all routes inside github.router
+# 'github.router' is an APIRouter instance defined in your route file (endpoints.py).
+# 'prefix="/github"' = Adds a URL prefix to all routes inside that router. Every endpoint path will have the word 'github' prepended. *Users still need to enter the "/github" parameter themselves
 # @router.get("/me") becomes '/github/me'
 # It allows you to:
 # - group endpoints logically (/github, /users, /ai)

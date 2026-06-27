@@ -3,10 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 # HTTPException → controlled API errors
 # Query → query validation (pagination rules)
 import httpx # In this file that used only for exception type handling
+from groq import AsyncGroq
 
 from app.services.github_services import GitHubService
 from app.configurations.config import settings
 from app.configurations.http import get_http_client
+from app.services.LLM_services import LLMService
 
 # This is a 3-layer dependency pipeline:
 # HTTP Client → GitHubService → API Routes
@@ -19,7 +21,7 @@ from app.configurations.http import get_http_client
 #         ↓
 # endpoint (/me, /repos)
 
-router = APIRouter() # creates isolated route module, later attached in main.py
+router = APIRouter(tags=["Get Me and Get Repos"]) # creates isolated route module, later attached in main.py
 
 # Dependency factory (service layer construction)
 # Request → client → service → endpoint
@@ -30,6 +32,7 @@ router = APIRouter() # creates isolated route module, later attached in main.py
 # Depends → injects it
 # type hint → describes it
 
+# Calling the GitHub services by GitHub token
 def get_github_service(
     client: httpx.AsyncClient = Depends(get_http_client), # client: httpx.AsyncClient , Type hint for the injected object. **Type hint is not limited to int, str, bool. They can be custom classes(GitHubService) or third-party types(httpx.AsyncClient)
                                                           # Why httpx.AsyncClient is used as a type hint here. This does NOT create the client.
@@ -38,10 +41,18 @@ def get_github_service(
 ):
     return GitHubService(settings.github_token, client) # builds GitHubService and returns it to endpoint
 
+# Calling the Groq LLM by Groq API key
+def get_llm_service():
+    client = AsyncGroq(
+        api_key=settings.GROQ_API_KEY
+    )
+    return LLMService(client)
+
 
 @router.get("/me") # Attached later via include_router in main.py
 async def get_me(
-    service: GitHubService = Depends(get_github_service)
+    service: GitHubService = Depends(get_github_service) # 为什么这里需要“GitHubService”，即使有或没有都可以运行
+                                                         # 因为我或者别人可以立刻知道这个variable（service）是一个 “GitHubService” 的instance，可以调用它的methods和attributes。不需要跳去“get_github_service”才能猜出类型（Type Hint）
 ):
     try:
         return await service.get_user()
@@ -53,7 +64,6 @@ async def get_me(
                 "status": e.response.status_code
             }
         )
-
 
 @router.get("/users/{username}/repos")
 async def get_repos( # get the info of any public("private": false) repositories on the GitHub by searching username
@@ -115,7 +125,7 @@ async def get_repos( # get the info of any public("private": false) repositories
             }
         )
 
-# Full execution flow:
+# Full execution flow until here:
 
 # HTTP request
 #   ↓
@@ -132,3 +142,24 @@ async def get_repos( # get the info of any public("private": false) repositories
 # service calls GitHub API
 #   ↓
 # return response
+
+
+# @router.get("/users/{username}/analysis")
+# async def analyze_user_repositories(
+#     username: str,
+#     github_service: GitHubService = Depends(get_github_service),
+#     llm_service: LLMService = Depends(get_llm_service),
+# ):
+#     repos = await github_service.get_user_repos(
+#         username=username,
+#         per_page=30,
+#     )
+#
+#     analysis = await llm_service.analyze_repositories(
+#         repos
+#     )
+#
+#     return {
+#         "username": username,
+#         "analysis": analysis,
+#     }

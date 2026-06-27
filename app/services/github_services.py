@@ -35,7 +35,8 @@ class GitHubService:
 
     # Public method (retrieve current authenticated GitHub user)
     async def get_user(self):
-        return await self._get("/user") # call the helper method, equivalent to "GET https://api.github.com/user"
+        return await self._get("/user") # call the helper method, equivalent to "GET https://api.github.com/user"，
+        # “/user" 是一个github的特殊endpoint，它可以根据我的Fine Grained Token来知道并返回我github账户的资料
 
 # The working flow until here "get_user" -------------------
     # get_user()
