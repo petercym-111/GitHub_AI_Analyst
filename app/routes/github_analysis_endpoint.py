@@ -1,7 +1,7 @@
 from app.crud.github_analysis import GitHubAnalysisCRUD
 from app.crud.analysis_request_log import AnalysisRequestLogCRUD
 from app.database.dependencies import get_db
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from app.routes.endpoints import *
 
 import time
@@ -17,20 +17,20 @@ async def analyze_user_repositories(
     llm_service: LLMService = Depends(
         get_llm_service
     ),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
-    start = time.perf_counter()
+    start = time.perf_counter() # 记录request开始时间。给予后面的“duration_ms = ...” 用来分析耗时
 
     try:
         # check cache
         cached = (
-            await GitHubAnalysisCRUD.get_by_username(
+            await GitHubAnalysisCRUD.get_by_username( # 先查数据库：这个 GitHub 用户以前分析过了吗？
                 db,
                 username,
             )
         )
 
-        if cached:
+        if cached: # 如果这个用户存在于database，下面的return直接返回用户的分析结果，不需要重新回去Github 找这个用户再丢给LLM分析
             duration = int(
                 (time.perf_counter() - start)
                 * 1000
@@ -44,26 +44,26 @@ async def analyze_user_repositories(
                 duration_ms=duration,
             )
 
-            return {
+            return { # 这个return返回保存过的用户名和分析结果
                 "username": username,
                 "cached": True,
                 "analysis": cached.analysis,
             }
 
         # fetch repositories
-        repos = await github_service.get_user_repos(
+        repos = await github_service.get_user_repos( # 调用 GitHub API，获取 repositories。
             username=username,
             per_page=30,
         )
 
         # llm analysis
         analysis = (
-            await llm_service.analyze_repositories(
+            await llm_service.analyze_repositories( # 把 repos 丢给 LLM。LLM就可以分析了
                 repos
             )
         )
 
-        # save analysis
+        # save analysis 保存分析结果
         saved_analysis = (
             await GitHubAnalysisCRUD.create(
                 db,
@@ -79,7 +79,7 @@ async def analyze_user_repositories(
             * 1000
         )
 
-        # save request log
+        # save request log 保存request日志，例如：什么时候请求，成功失败，耗时多少
         await AnalysisRequestLogCRUD.create(
             db,
             github_username=username,
@@ -100,7 +100,8 @@ async def analyze_user_repositories(
             * 1000
         )
 
-        await AnalysisRequestLogCRUD.create(
+        # 如果上面的exception抓到其中一个：GitHub 挂了，LLM 挂了。除了Database 挂了的话，就保存不到数据进去database。
+        await AnalysisRequestLogCRUD.create( # 这里仍然会记录/保存失败日志。然后在下面的raise error返回500
             db,
             github_username=username,
             analysis_id=None,
@@ -121,18 +122,18 @@ async def analyze_user_repositories(
 #     ↓
 # Endpoint
 #     ↓
-# GitHubAnalysisCRUD.get_by_username()
+# GitHubAnalysisCRUD.get_by_username() （Check Cache）
 #     ↓
 # Cache Hit?
 #   /     \
 #  yes    no
 #   |      |
-# return   GitHubService
+# return   GitHubService（GitHub API）
 #          ↓
 #          LLMService
 #          ↓
-#          GitHubAnalysisCRUD.create()
+#          GitHubAnalysisCRUD.create() （Save Analysis）
 #          ↓
-#          AnalysisRequestLogCRUD.create()
+#          AnalysisRequestLogCRUD.create() （Save Log）
 #          ↓
 #          return

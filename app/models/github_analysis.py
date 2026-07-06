@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from sqlalchemy import Text, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -8,7 +8,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.db_session import Base
 
+if TYPE_CHECKING: # 因为IDE 有类型提示。所以Python 运行时不会真的 import。就不容易发生 circular import。
+    from app.models.analysis_request_log import AnalysisRequestLog
 
+# 以下是SQLAlchemy 2.0， 旧版的是“Column(...)”
 class GitHubAnalysis(Base):
     __tablename__ = "github_analysis"
 
@@ -19,16 +22,16 @@ class GitHubAnalysis(Base):
     )                                # Public ID  : UUID     例如： public_id = 085e9f89-e49e-498e-842a-fe9ee0c83ac5   ，API return可以用这个
 
     github_username: Mapped[str] = mapped_column(
-        String(255),
+        String(255), #database的VARCHAR(255)
         index=True,
     )
 
     repo_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB
+        JSONB # 让database 知道，这是存的json而不是单纯的text
     )
 
-    analysis: Mapped[str] = mapped_column(
-        Text
+    analysis: Mapped[str] = mapped_column( # 代表 Python: analysis 是 str
+        Text # 代表 Database: analysis 是 TEXT
     )
 
     model_name: Mapped[str] = mapped_column(
@@ -37,7 +40,7 @@ class GitHubAnalysis(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        default=datetime.utcnow, # 当前时间
     )
 
     requests: Mapped[list["AnalysisRequestLog"]] = relationship(

@@ -1,4 +1,4 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.analysis_request_log import (
     AnalysisRequestLog,
@@ -9,7 +9,7 @@ class AnalysisRequestLogCRUD:
 
     @staticmethod
     async def create(
-        db: AsyncSession,
+        db: Session,
         *,
         github_username: str,
         analysis_id: str | None,
@@ -28,7 +28,7 @@ class AnalysisRequestLogCRUD:
 
         db.add(obj)
 
-        await db.commit()
-        await db.refresh(obj)
+        db.commit()
+        db.refresh(obj)
 
         return obj
