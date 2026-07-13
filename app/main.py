@@ -114,6 +114,7 @@ async def lifespan(app: FastAPI): # Defines a function that FastAPI will call to
                                         # - send asynchronous HTTP requests from your backend to external APIs
 
         base_url="https://api.github.com", # This sets a default root URL.
+                                           # 所有request默认都是发送到：https://api.github.com
                                            # instead of: await client.get("https://api.github.com/user")
                                            # you can do: await client.get("/user")
 

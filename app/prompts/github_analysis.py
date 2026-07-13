@@ -19,14 +19,21 @@ Repositories:
 
 {repositories}
 
-Return JSON with exactly these fields:
+Return exactly this JSON structure:
 
-{
-  "summary": "...",
-  "technologies": [],
-  "categories": [],
-  "strengths": [],
-  "weaknesses": [],
-  "learning_recommendations": []
-}
+{{
+    "overall_profile": "...",
+    "main_technologies": [
+        "..."
+    ],
+    "project_categories": [
+        "..."
+    ],
+    "repository_quality": [
+        "..."
+    ],
+    "learning_recommendations": [
+        "..."
+    ]
+}}
 """

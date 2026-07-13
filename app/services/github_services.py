@@ -1,4 +1,26 @@
 import httpx
+from fastapi import Depends
+
+from app.configurations.config import settings
+from app.configurations.http import get_http_client
+
+# Dependency factory (service layer construction)
+# Request → client → service → endpoint
+
+# lifespan → creates AsyncClient
+# app.state → stores it
+# get_http_client → retrieves it
+# Depends → injects it
+# type hint → describes it
+
+# Calling the GitHub services by GitHub token
+def get_github_service(
+    client: httpx.AsyncClient = Depends(get_http_client), # client: httpx.AsyncClient , Type hint for the injected object. **Type hint is not limited to int, str, bool. They can be custom classes(GitHubService) or third-party types(httpx.AsyncClient)
+                                                          # Why httpx.AsyncClient is used as a type hint here. This does NOT create the client.
+                                                          # It only declares: client must be an instance of AsyncClient. It still needed to describe what kind of object is being injected
+                                                          # FastAPI first resolves get_http_client then inject the client
+):
+    return GitHubService(settings.github_token, client) # builds GitHubService and returns it to endpoint
 
 class GitHubService:
     # Responsibilities:
@@ -24,7 +46,7 @@ class GitHubService:
         }
 
     # Private helper method (This is an internal reusable GET method. Without it that you need to write repeated code for both the public method)
-    async def _get(self, url: str, **kwargs): # **kwargs = accept any extra keyword arguments if any
+    async def _get(self, url: str, **kwargs): # **kwargs = accept extra keyword arguments if any
         res = await self.client.get( # Send HTTP request by using the shared AsyncClient.
             url, # Example: "/user" . Because base_url was configured earlier: "https://api.github.com" . Final URL becomes: "https://api.github.com/user"
             headers=self.headers, # Adds authentication.

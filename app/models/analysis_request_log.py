@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.github_analysis import GitHubAnalysis
 
+# 以下都是最新版本的 Mapped
 class AnalysisRequestLog(Base):
     __tablename__ = "analysis_request_log"
 

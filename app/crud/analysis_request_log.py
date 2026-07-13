@@ -10,7 +10,12 @@ class AnalysisRequestLogCRUD:
     @staticmethod
     async def create(
         db: Session,
-        *,
+        *, # 这个“*”代表后面的参数全部必须使用 keyword argument来传递
+            #例如：github_username="torvalds",
+            #     analysis_id=None,
+            #     success=True,
+            #     duration_ms=512,
+            #     error_message=None,
         github_username: str,
         analysis_id: str | None,
         success: bool,

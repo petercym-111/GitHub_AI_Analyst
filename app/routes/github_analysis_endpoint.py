@@ -1,9 +1,15 @@
 from app.crud.github_analysis import GitHubAnalysisCRUD
 from app.crud.analysis_request_log import AnalysisRequestLogCRUD
-from app.database.dependencies import get_db
-from sqlalchemy.orm import Session
-from app.routes.endpoints import *
 
+from app.database.dependencies import get_db
+
+from app.services.github_services import GitHubService
+from app.services.github_services import get_github_service
+from app.services.LLM_services import LLMService
+from app.services.LLM_services import get_llm_service
+
+from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException
 import time
 
 router = APIRouter(tags=["LLM Analysis"])
@@ -30,7 +36,7 @@ async def analyze_user_repositories(
             )
         )
 
-        if cached: # 如果这个用户存在于database，下面的return直接返回用户的分析结果，不需要重新回去Github 找这个用户再丢给LLM分析
+        if cached: # 如果这个用户存在于database，下面的return直接返回用户的分析结果，不需要重新回去Github， 也不需要找这个用户再丢给LLM分析。
             duration = int(
                 (time.perf_counter() - start)
                 * 1000
@@ -39,7 +45,7 @@ async def analyze_user_repositories(
             await AnalysisRequestLogCRUD.create(
                 db,
                 github_username=username,
-                analysis_id=cached.id,
+                analysis_id=cached.id, # access the variable "cached" that which return back the data from database
                 success=True,
                 duration_ms=duration,
             )
@@ -59,7 +65,7 @@ async def analyze_user_repositories(
         # llm analysis
         analysis = (
             await llm_service.analyze_repositories( # 把 repos 丢给 LLM。LLM就可以分析了
-                repos
+                repos,
             )
         )
 
@@ -70,7 +76,7 @@ async def analyze_user_repositories(
                 github_username=username,
                 repo_snapshot=repos,
                 analysis=analysis,
-                model_name="openai/gpt-oss-120b",
+                model_name=llm_service.MODEL_NAME,
             )
         )
 
@@ -100,8 +106,8 @@ async def analyze_user_repositories(
             * 1000
         )
 
-        # 如果上面的exception抓到其中一个：GitHub 挂了，LLM 挂了。除了Database 挂了的话，就保存不到数据进去database。
-        await AnalysisRequestLogCRUD.create( # 这里仍然会记录/保存失败日志。然后在下面的raise error返回500
+        # 如果上面的exception抓到其中一个：GitHub 挂了，LLM 挂了。
+        await AnalysisRequestLogCRUD.create( # 这里仍然会记录/保存失败日志。然后在下面的raise error返回500。除了Database 挂了的话，就保存不到数据进去database。
             db,
             github_username=username,
             analysis_id=None,

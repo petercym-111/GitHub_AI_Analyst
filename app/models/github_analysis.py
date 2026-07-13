@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 from typing import Any, TYPE_CHECKING
 
-from sqlalchemy import Text, String, DateTime
+from sqlalchemy import String, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,9 +30,9 @@ class GitHubAnalysis(Base):
         JSONB # 让database 知道，这是存的json而不是单纯的text
     )
 
-    analysis: Mapped[str] = mapped_column( # 代表 Python: analysis 是 str
-        Text # 代表 Database: analysis 是 TEXT
-    )
+    analysis: Mapped[dict] = mapped_column( # 代表 Python: analysis 是 str
+        JSONB # 代表 Database: analysis 是 json。 分析结果要确保是json
+    ) # JSONB 存的是：dict和list，不是str。 所以这里Mapped[dict]也必须要跟着
 
     model_name: Mapped[str] = mapped_column(
         String(100)

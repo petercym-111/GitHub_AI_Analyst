@@ -12,7 +12,7 @@ class GitHubAnalysisCRUD:
         *,
         github_username: str,
         repo_snapshot: list[dict],
-        analysis: str,
+        analysis: dict,
         model_name: str,
     ) -> GitHubAnalysis:
 
@@ -56,7 +56,7 @@ class GitHubAnalysisCRUD:
                                             # 如果没有才return None， 超过一个object就会raise exception (MultipleResultsFound)
 
     @staticmethod
-    async def delete(
+    async def delete( # not used yet
         db: Session,
         analysis: GitHubAnalysis,
     ) -> None:
