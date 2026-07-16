@@ -14,7 +14,7 @@ import time
 
 router = APIRouter(tags=["LLM Analysis"])
 
-@router.get("/users/{username}/analysis")
+@router.post("/users/{username}/analysis")
 async def analyze_user_repositories(
     username: str,
     github_service: GitHubService = Depends(
