@@ -5,6 +5,7 @@ from app.database.dependencies import get_db
 
 from app.services.github_services import GitHubService
 from app.services.github_services import get_github_service
+from app.services.github_analysis_service import analyze_repositories
 from app.services.LLM_services import LLMService
 from app.services.LLM_services import get_llm_service
 
@@ -64,8 +65,9 @@ async def analyze_user_repositories(
 
         # llm analysis
         analysis = (
-            await llm_service.analyze_repositories( # 把 repos 丢给 LLM。LLM就可以分析了
+            await analyze_repositories( # 分析模块准备 GitHub 数据，再通过 LLMService 调用模型。
                 repos,
+                llm_service=llm_service,
             )
         )
 
@@ -135,6 +137,8 @@ async def analyze_user_repositories(
 #  yes    no
 #   |      |
 # return   GitHubService（GitHub API）
+#          ↓
+#          analyze_repositories（GitHub 分析流程）
 #          ↓
 #          LLMService
 #          ↓

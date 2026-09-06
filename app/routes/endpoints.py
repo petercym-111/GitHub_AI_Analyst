@@ -115,6 +115,9 @@ async def get_repos( # get the info of any public("private": false) repositories
 # return response
 
 
+# from app.services.github_analysis_service import analyze_repositories
+# from app.services.LLM_services import LLMService, get_llm_service
+#
 # @router.get("/users/{username}/analysis")
 # async def analyze_user_repositories(
 #     username: str,
@@ -126,8 +129,9 @@ async def get_repos( # get the info of any public("private": false) repositories
 #         per_page=30,
 #     )
 #
-#     analysis = await llm_service.analyze_repositories(
-#         repos
+#     analysis = await analyze_repositories(
+#         repos,
+#         llm_service=llm_service,
 #     )
 #
 #     return {

@@ -1,4 +1,4 @@
-# prompts for LLM_services.py
+# prompts for github_analysis_service.py
 # 拆成两个 Prompt，以后只改 Prompt，不需要改 Python 代码。
 
 SYSTEM_PROMPT = """
