@@ -19,7 +19,7 @@ def get_llm_service():
 
 class LLMService:
 
-    MODEL_NAME = "llama-3.3-70b-versatile" # 以后改模型只需要改这里
+    MODEL_NAME = "openai/gpt-oss-120b" # 以后改模型只需要改这里
 
     def __init__(self,client: AsyncGroq):
         self.client = client # AsyncGroq 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncGroq。
