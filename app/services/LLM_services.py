@@ -1,6 +1,6 @@
 import json
 
-from groq import AsyncGroq
+from openai import AsyncOpenAI
 from app.configurations.config import settings
 
 from app.prompts.github_analysis import (
@@ -12,8 +12,9 @@ from app.prompts.github_analysis import (
 
 # Calling the Groq LLM by Groq API key
 def get_llm_service():
-    client = AsyncGroq(
-        api_key=settings.GROQ_API_KEY
+    client = AsyncOpenAI(
+        api_key=settings.GROQ_API_KEY,
+        base_url="https://api.groq.com/openai/v1"
     )
     return LLMService(client)
 
@@ -21,8 +22,8 @@ class LLMService:
 
     MODEL_NAME = "openai/gpt-oss-120b" # 以后改模型只需要改这里
 
-    def __init__(self,client: AsyncGroq):
-        self.client = client # AsyncGroq 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncGroq。
+    def __init__(self,client: AsyncOpenAI):
+        self.client = client # AsyncOpenAI 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncOpenAI。
 
     @staticmethod # 这里并没有使用class（LLMService）的任何东西，只是设计上它算是在LLMService里面。但可以读取到class state（MODEL_NAME），不过不应依赖class state。如果这里需要经常读取或修改class state，那么它更适合设计成 ”@classmethod“
     def _summarize_repositories( # 这里还没有动用到LLM，这里只是在从原始的 GitHub JSON 里挑出最有价值的几个字段，再组成新的 JSON
@@ -75,9 +76,9 @@ class LLMService:
         )
 
         response = (
-            await self.client.chat.completions.create(
+            await self.client.responses.create(
                 model=self.MODEL_NAME,
-                messages=[
+                input=[
                     {
                         "role": "system",
                         "content": SYSTEM_PROMPT,
@@ -87,15 +88,15 @@ class LLMService:
                         "content": user_prompt,
                     },
                 ],
-                response_format={
-                    "type": "json_object"
+                text={
+                    "format": {"type": "json_object"}
                 },
             )
         )
 
-        content = response.choices[0].message.content
+        content = response.output_text
 
-        #print(f"!!!!!!here is content!!!!!"+content+"!!!!!!!!!")
+
 
         data = json.loads(content)
 
