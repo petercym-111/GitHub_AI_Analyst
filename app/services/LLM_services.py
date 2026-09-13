@@ -1,20 +1,12 @@
-from openai import AsyncOpenAI
-from app.configurations.config import settings
-
+from app.clients.groq_client import groq_client
 # Calling the Groq LLM by Groq API key
-def get_llm_service():
-    client = AsyncOpenAI(
-        api_key=settings.GROQ_API_KEY,
-        base_url="https://api.groq.com/openai/v1"
-    )
-    return LLMService(client)
 
 class LLMService:
 
     MODEL_NAME = "openai/gpt-oss-120b" # 以后改模型只需要改这里
 
-    def __init__(self,client: AsyncOpenAI):
-        self.client = client # AsyncOpenAI 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncOpenAI。
+    def __init__(self):
+        self.client = groq_client # AsyncOpenAI 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncOpenAI。
 
     async def generate_text(
         self,

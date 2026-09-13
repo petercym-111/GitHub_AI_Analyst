@@ -7,7 +7,6 @@ from app.services.github_services import GitHubService
 from app.services.github_services import get_github_service
 from app.services.github_analysis_service import analyze_repositories
 from app.services.LLM_services import LLMService
-from app.services.LLM_services import get_llm_service
 
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,9 +20,7 @@ async def analyze_user_repositories(
     github_service: GitHubService = Depends(
         get_github_service
     ),
-    llm_service: LLMService = Depends(
-        get_llm_service
-    ),
+    llm_service: LLMService = Depends(LLMService) ,
     db: Session = Depends(get_db),
 ):
     start = time.perf_counter() # 记录request开始时间。给予后面的“duration_ms = ...” 用来分析耗时
