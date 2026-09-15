@@ -1,4 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.configurations.agent import get_agent_service
+from app.routes.agent_response import run_agent
+from app.schemas.endpoint_instruction import EndpointInstruction
+from app.schemas.github_repositories import RepositoryAgentResponse
+from app.services.agent_service import AgentService, ToolContext
 # APIRouter → modular route grouping
 # HTTPException → controlled API errors
 # Query → query validation (pagination rules)
@@ -36,9 +42,13 @@ async def get_me( # 这里还不涉及任何LLM， 只有单纯的github service
             }
         )
 
-@router.get("/users/{username}/repos") # 这里还不涉及任何LLM， 只有单纯的github service
+@router.post(
+    "/users/repos",
+    response_model=RepositoryAgentResponse,
+    response_model_exclude_unset=True,
+)
 async def get_repos( # get the info of any public("private": false) repositories on the GitHub by searching username
-    username: str,
+    instruction: EndpointInstruction,
     # --------------------------------------
     # Pagination is a technique to split a large dataset into smaller chunks (pages) and retrieve them incrementally.
     # Use it whenever a response can grow beyond a small, fixed size:
@@ -83,10 +93,12 @@ async def get_repos( # get the info of any public("private": false) repositories
         # total_items(repositories) = 2
         # get 1 item into page 2
     # --------------------------------------
-    service: GitHubService = Depends(get_github_service)
+    service: GitHubService = Depends(get_github_service),
+    agent_service: AgentService = Depends(get_agent_service),
 ):
+    username = instruction.username
     try:
-        return await service.get_user_repos(username, page, per_page)
+        repos = await service.get_user_repos(username, page, per_page)
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=e.response.status_code,
@@ -95,6 +107,24 @@ async def get_repos( # get the info of any public("private": false) repositories
                 "status": e.response.status_code
             }
         )
+
+    # Always fetch the page first; optional instructions only add response fields.
+    agent_result = await run_agent(
+        agent_service,
+        instruction.message,
+        context=ToolContext(
+            tool_name="get_github_repos",
+            arguments={"username": username, "page": page, "per_page": per_page},
+            result=repos,
+        ),
+    )
+    return {
+        "username": username,
+        "page": page,
+        "per_page": per_page,
+        "repositories": repos,
+        **agent_result,
+    }
 
 # Full execution flow until here:
 
@@ -115,6 +145,9 @@ async def get_repos( # get the info of any public("private": false) repositories
 # return response
 
 
+# from app.services.github_analysis_service import analyze_repositories
+# from app.services.LLM_services import LLMService, get_llm_service
+#
 # @router.get("/users/{username}/analysis")
 # async def analyze_user_repositories(
 #     username: str,
@@ -126,8 +159,9 @@ async def get_repos( # get the info of any public("private": false) repositories
 #         per_page=30,
 #     )
 #
-#     analysis = await llm_service.analyze_repositories(
-#         repos
+#     analysis = await analyze_repositories(
+#         repos,
+#         llm_service=llm_service,
 #     )
 #
 #     return {

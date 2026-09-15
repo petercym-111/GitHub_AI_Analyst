@@ -1,102 +1,38 @@
-import json
-
-from groq import AsyncGroq
-from app.configurations.config import settings
-
-from app.prompts.github_analysis import (
-    SYSTEM_PROMPT,
-    USER_PROMPT,
-)
-
-#from app.schemas.github_analysis import GitHubAnalysisSchema
-
+from app.clients.groq_client import groq_client
 # Calling the Groq LLM by Groq API key
-def get_llm_service():
-    client = AsyncGroq(
-        api_key=settings.GROQ_API_KEY
-    )
-    return LLMService(client)
 
 class LLMService:
 
     MODEL_NAME = "openai/gpt-oss-120b" # 以后改模型只需要改这里
 
-    def __init__(self,client: AsyncGroq):
-        self.client = client # AsyncGroq 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncGroq。
+    def __init__(self):
+        self.client = groq_client # AsyncOpenAI 已经包含了API Key， 因此 llm_service.py 不需要再次创建 AsyncOpenAI。
 
-    @staticmethod # 这里并没有使用class（LLMService）的任何东西，只是设计上它算是在LLMService里面。但可以读取到class state（MODEL_NAME），不过不应依赖class state。如果这里需要经常读取或修改class state，那么它更适合设计成 ”@classmethod“
-    def _summarize_repositories( # 这里还没有动用到LLM，这里只是在从原始的 GitHub JSON 里挑出最有价值的几个字段，再组成新的 JSON
-        repos: list[dict],
-    ) -> list[dict]:
-
-        summary = []
-
-        for repo in repos: # 数据筛选
-            summary.append(
-                {
-                    "name": repo.get(
-                        "name"
-                    ),
-                    "description": repo.get(
-                        "description"
-                    ),
-                    "language": repo.get(
-                        "language"
-                    ),
-                    "topics": repo.get(
-                        "topics"
-                    ),
-                    "stars": repo.get(
-                        "stargazers_count"
-                    ),
-                    "forks": repo.get(
-                        "forks_count"
-                    ),
-                }
-            )
-
-        return summary
-
-
-    async def analyze_repositories(
+    async def generate_text(
         self,
-        repos: list[dict],
-    ) :
-
-        repo_summary = self._summarize_repositories(
-            repos
-        )
-
-        user_prompt = USER_PROMPT.format(
-            repositories=json.dumps(
-                repo_summary,
-                indent=2,
-            )
-        )
-
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        # 通用模型调用：接收 prompt，沿用 JSON 模式并返回原始响应文本。
+        # 具体业务的字段筛选、prompt 组装和结果解析由调用方负责。
         response = (
-            await self.client.chat.completions.create(
+            await self.client.responses.create(
                 model=self.MODEL_NAME,
-                messages=[
+                input=[
                     {
                         "role": "system",
-                        "content": SYSTEM_PROMPT,
+                        "content": system_prompt,
                     },
                     {
                         "role": "user",
                         "content": user_prompt,
                     },
                 ],
-                response_format={
-                    "type": "json_object"
+                text={
+                    "format": {"type": "json_object"}
                 },
             )
         )
 
-        content = response.choices[0].message.content
-
-        #print(f"!!!!!!here is content!!!!!"+content+"!!!!!!!!!")
-
-        data = json.loads(content)
-
-        return data
+        return response.output_text
