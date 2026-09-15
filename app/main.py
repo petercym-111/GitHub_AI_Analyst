@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 import httpx
 from contextlib import asynccontextmanager
-from groq import AsyncGroq
 
 from app.configurations.config import settings
+from app.clients.groq_client import groq_client
 from app.routes import endpoints as github
 from app.routes import github_analysis_endpoint as analysis
 
@@ -121,7 +121,12 @@ async def lifespan(app: FastAPI): # Defines a function that FastAPI will call to
         timeout=10.0, # if GitHub API does not respond within 10 seconds → abort request
     )
 
-    yield  # yield separates startup and shutdown phases. It pauses execution after initialization, lets FastAPI run the application normally,
+    try:
+        yield  # The application serves requests while the lifespan is suspended.
+    finally:
+        await app.state.http_client.aclose()
+        await groq_client.close()
+    # yield separates startup and shutdown phases. It pauses execution after initialization, lets FastAPI run the application normally,
            # and only resumes when the server is shutting down — not after individual requests finish.
            # app runs here = This is the boundary between startup and shutdown, without yield the app will not properly start serving requests.
            # Everything before = startup
@@ -130,7 +135,6 @@ async def lifespan(app: FastAPI): # Defines a function that FastAPI will call to
                 # FastAPI is running normally (handling requests)
 
     # Shutdown Section
-    await app.state.http_client.aclose()
     # Properly closes the HTTP client
     # Releases:
          # - open TCP connections

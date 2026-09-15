@@ -1,6 +1,7 @@
 import json
 
 from app.prompts.github_analysis import SYSTEM_PROMPT, USER_PROMPT
+from app.schemas.github_analysis import GitHubAnalysisSchema
 from app.services.LLM_services import LLMService
 
 
@@ -39,4 +40,5 @@ async def analyze_repositories(
         user_prompt=user_prompt,
     )
 
-    return json.loads(content)
+    # Validate the model's JSON shape before it can be persisted or exported.
+    return GitHubAnalysisSchema.model_validate_json(content).model_dump()

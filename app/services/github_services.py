@@ -70,6 +70,10 @@ class GitHubService:
     # GitHub API
 #  --------------- --------------- ---------------
 
+    async def get_public_user(self, username: str):
+        """Confirm the requested account exists, independently of analysis cache."""
+        return await self._get(f"/users/{username}")
+
     # retrieve repositories for a GitHub user
     async def get_user_repos(
         self,
