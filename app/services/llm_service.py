@@ -1,5 +1,6 @@
 from app.clients.groq_client import groq_client
-# Calling the Groq LLM by Groq API key
+from app.exceptions import EmptyModelResponseError
+# Single Responses request for repository analysis; no tools or agent loop.
 
 class LLMService:
 
@@ -35,4 +36,6 @@ class LLMService:
             )
         )
 
+        if not response.output_text.strip():
+            raise EmptyModelResponseError("Analysis model returned an empty response")
         return response.output_text

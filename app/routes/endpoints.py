@@ -6,6 +6,10 @@ import httpx # In this file that used only for exception type handling
 
 from app.services.github_services import GitHubService
 from app.services.github_services import get_github_service
+from app.services.agent_service import AgentService
+from app.services.github_workflow_service import get_repositories
+from app.exceptions import OptionalAgentError
+from app.routes.error_handlers import optional_agent_response, to_http_exception
 
 # This is a 3-layer dependency pipeline:
 # HTTP Client → GitHubService → API Routes
@@ -36,105 +40,21 @@ async def get_me( # 这里还不涉及任何LLM， 只有单纯的github service
             }
         )
 
-@router.get("/users/{username}/repos") # 这里还不涉及任何LLM， 只有单纯的github service
-async def get_repos( # get the info of any public("private": false) repositories on the GitHub by searching username
+@router.post("/users/{username}/repos")
+async def get_repos(
     username: str,
-    # --------------------------------------
-    # Pagination is a technique to split a large dataset into smaller chunks (pages) and retrieve them incrementally.
-    # Use it whenever a response can grow beyond a small, fixed size:
-        # - database queries (users, orders, logs)
-        # - external APIs (GitHub, Stripe, OpenAI, etc.)
-        # - search results
-        # - event streams / activity feeds
-    # If a single request could return hundreds or thousands of items, you need pagination.
-    # Full dataset → divided into pages → fetched piece by piece
-
-        # Instead of:
-        # GET /repos → returns 10,000 items
-
-        # You do:
-        # GET /repos?page=1&per_page=30
-        # GET /repos?page=2&per_page=30
-
-    # *pagination parameters controlling how data is sliced. The below is the offset-based
-    # Example: '?page=1&per_page=30' , means return up to 30 repositories from the first page(the first slice of the dataset), depending on how many repositories exist.
-    # It does not  guarantee 30 items(repositories), if
-
-        # The data is enough:
-        # total = 100 repos
-        # page=1 → 30 items
-        # page=2 → 30 items
-        # page=3 → 30 items
-        # page=4 → 10 items (remaining)
-
-        # Small dataset:
-        # total = 12 repos
-        # page=1 → 12 items (not 30)
-
-        # Out of range:
-        # page=10
-        # → empty list []
-
-    page: int = Query(1, ge=1), # (which slice) query param = Default: 1 and Constraint must be: >= 1
-    per_page: int = Query(30, ge=1, le=100), # (max items per slice) Default: 30, Constraints range: minimum is 1 and maximum is 100
-    # Example:
-        # page = 2
-        # per_page = 1
-        # total_items(repositories) = 2
-        # get 1 item into page 2
-    # --------------------------------------
-    service: GitHubService = Depends(get_github_service)
+    page: int = Query(1, ge=1),
+    per_page: int = Query(1, ge=1, le=1),
+    message: str | None = Query(default=None, max_length=4000),
+    agent_service: AgentService = Depends(AgentService),
+    service: GitHubService = Depends(get_github_service),
 ):
     try:
-        return await service.get_user_repos(username, page, per_page)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=e.response.status_code,
-            detail={
-                "message": "GitHub API error",
-                "status": e.response.status_code
-            }
+        return await get_repositories(
+            username=username, page=page, per_page=per_page, message=message,
+            github_service=service, agent_service=agent_service,
         )
-
-# Full execution flow until here:
-
-# HTTP request
-#   ↓
-# FastAPI parses path + query
-#   ↓
-# resolve get_http_client
-#   ↓
-# resolve get_github_service
-#   ↓
-# inject GitHubService
-#   ↓
-# call endpoint function
-#   ↓
-# service calls GitHub API
-#   ↓
-# return response
-
-
-# from app.services.github_analysis_service import analyze_repositories
-# from app.services.LLM_services import LLMService, get_llm_service
-#
-# @router.get("/users/{username}/analysis")
-# async def analyze_user_repositories(
-#     username: str,
-#     github_service: GitHubService = Depends(get_github_service),
-#     llm_service: LLMService = Depends(get_llm_service),
-# ):
-#     repos = await github_service.get_user_repos(
-#         username=username,
-#         per_page=30,
-#     )
-#
-#     analysis = await analyze_repositories(
-#         repos,
-#         llm_service=llm_service,
-#     )
-#
-#     return {
-#         "username": username,
-#         "analysis": analysis,
-#     }
+    except OptionalAgentError as exc:
+        return optional_agent_response(exc)
+    except Exception as exc:
+        raise to_http_exception(exc) from exc

@@ -1,9 +1,7 @@
 from fastapi import FastAPI
 import httpx
 from contextlib import asynccontextmanager
-from groq import AsyncGroq
 
-from app.configurations.config import settings
 from app.routes import endpoints as github
 from app.routes import github_analysis_endpoint as analysis
 
@@ -174,4 +172,4 @@ app.include_router(github.router, prefix="/github", tags=["GitHub"])
 # All routes under that router appear under a "GitHub" section:
 # GitHub
 #   ├── GET /github/me
-#   ├── GET /github/users/{username}/repos
+#   ├── POST /github/users/{username}/repos

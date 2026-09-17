@@ -1,7 +1,9 @@
 import json
 
+from app.exceptions import InvalidModelResponseError
+
 from app.prompts.github_analysis import SYSTEM_PROMPT, USER_PROMPT
-from app.services.LLM_services import LLMService
+from app.services.llm_service import LLMService
 
 
 def _summarize_repositories(repos: list[dict]) -> list[dict]:
@@ -39,4 +41,10 @@ async def analyze_repositories(
         user_prompt=user_prompt,
     )
 
-    return json.loads(content)
+    try:
+        analysis = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise InvalidModelResponseError("Analysis is not valid JSON") from exc
+    if not isinstance(analysis, dict):
+        raise InvalidModelResponseError("Analysis must be a JSON object")
+    return analysis
