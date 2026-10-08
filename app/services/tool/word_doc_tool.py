@@ -4,8 +4,8 @@ create_doc_word_tool = {
     "name": "create_doc_word",
     "description": (
         "Creates a Microsoft Word (.docx) document containing the supplied text. "
-        "Use only when the user explicitly asks to create, save, or export a Word document,"
-        "reject user if the user ask to create a word document without specify "
+        "Use only when the user explicitly asks to create, save, or export a Word document."
+        "Reject user if the user ask to create a word document without specify "
         "what type of content should be in the document."
         "The document may contain repository data, completed "
         "GitHub analysis, weather results, or a requested combination. "

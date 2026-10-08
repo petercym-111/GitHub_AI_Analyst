@@ -15,7 +15,7 @@ if TYPE_CHECKING: # 因为IDE 有类型提示。所以Python 运行时不会真�
 class GitHubAnalysis(Base):
     __tablename__ = "github_analysis"
 
-    id: Mapped[str] = mapped_column( # 'uuid' 会在数据库里会自动生成类似“085e9f89-e49e-498e-842a-fe9ee0c83ac5”的乱码id，而不是普通的integer1，2，3，4...
+    id: Mapped[UUID] = mapped_column( # 'uuid' 会在数据库里会自动生成类似“085e9f89-e49e-498e-842a-fe9ee0c83ac5”的乱码id，而不是普通的integer1，2，3，4...
         UUID(as_uuid=True),          # 使用‘uuid’就不容易被hacker猜到，因为不可预测且全球唯一，但是缺点就是非常长，indexing比较差
         primary_key=True,            # 不过也有方法可以兼顾安全与性能，等项目大了后可以用以下这种方式：
         default=uuid4,               # Internal PK: BIGINT   例如： id = 12345   ，自己的database可以用这个

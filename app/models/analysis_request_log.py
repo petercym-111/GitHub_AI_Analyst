@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class AnalysisRequestLog(Base):
     __tablename__ = "analysis_request_log"
 
-    id: Mapped[str] = mapped_column(
+    id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid4,
@@ -33,7 +33,7 @@ class AnalysisRequestLog(Base):
         index=True,
     )
 
-    analysis_id: Mapped[str | None] = mapped_column(
+    analysis_id: Mapped[UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("github_analysis.id"),
         nullable=True,
