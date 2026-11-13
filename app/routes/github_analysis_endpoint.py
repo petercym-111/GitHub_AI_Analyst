@@ -1,145 +1,43 @@
-from app.crud.github_analysis import GitHubAnalysisCRUD
-from app.crud.analysis_request_log import AnalysisRequestLogCRUD
+import logging
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.database.dependencies import get_db
-
-from app.services.github_services import GitHubService
-from app.services.github_services import get_github_service
-from app.services.LLM_services import LLMService
-from app.services.LLM_services import get_llm_service
-
-from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException
-import time
+from app.exceptions import OptionalAgentError
+from app.routes.error_handlers import optional_agent_response, to_http_exception
+from app.services.agent_service import AgentService
+from app.services.github_services import GitHubService, get_github_service
+from app.services.github_workflow_service import get_analysis
+from app.services.llm_service import LLMService
 
 router = APIRouter(tags=["LLM Analysis"])
+logger = logging.getLogger(__name__)
+
 
 @router.post("/users/{username}/analysis")
 async def analyze_user_repositories(
     username: str,
-    github_service: GitHubService = Depends(
-        get_github_service
-    ),
-    llm_service: LLMService = Depends(
-        get_llm_service
-    ),
-    db: Session = Depends(get_db),
+    message: str | None = Query(default=None, max_length=4000),
+    github_service: GitHubService = Depends(get_github_service),
+    llm_service: LLMService = Depends(LLMService),
+    agent_service: AgentService = Depends(AgentService),
+    db: AsyncSession = Depends(get_db),
 ):
-    start = time.perf_counter() # 记录request开始时间。给予后面的“duration_ms = ...” 用来分析耗时
-
+    # Endpoint owns HTTP input/output; the service owns the workflow.
     try:
-        # check cache
-        cached = (
-            await GitHubAnalysisCRUD.get_by_username( # 先查数据库：这个 GitHub 用户以前分析过了吗？
-                db,
-                username,
-            )
+        # 1. 执行缓存/获取/分析/保存/日志流程，之后才进入可选 Agent 分支。
+        return await get_analysis(
+            username=username, message=message, github_service=github_service,
+            llm_service=llm_service, agent_service=agent_service, db=db,
         )
-
-        if cached: # 如果这个用户存在于database，下面的return直接返回用户的分析结果，不需要重新回去Github， 也不需要找这个用户再丢给LLM分析。
-            duration = int(
-                (time.perf_counter() - start)
-                * 1000
-            )
-
-            await AnalysisRequestLogCRUD.create(
-                db,
-                github_username=username,
-                analysis_id=cached.id, # access the variable "cached" that which return back the data from database
-                success=True,
-                duration_ms=duration,
-            )
-
-            return { # 这个return返回保存过的用户名和分析结果
-                "username": username,
-                "cached": True,
-                "analysis": cached.analysis,
-            }
-
-        # fetch repositories
-        repos = await github_service.get_user_repos( # 调用 GitHub API，获取 repositories。
-            username=username,
-            per_page=30,
-        )
-
-        # llm analysis
-        analysis = (
-            await llm_service.analyze_repositories( # 把 repos 丢给 LLM。LLM就可以分析了
-                repos,
-            )
-        )
-
-        # save analysis 保存分析结果
-        saved_analysis = (
-            await GitHubAnalysisCRUD.create(
-                db,
-                github_username=username,
-                repo_snapshot=repos,
-                analysis=analysis,
-                model_name=llm_service.MODEL_NAME,
-            )
-        )
-
-        duration = int(
-            (time.perf_counter() - start)
-            * 1000
-        )
-
-        # save request log 保存request日志，例如：什么时候请求，成功失败，耗时多少
-        await AnalysisRequestLogCRUD.create(
-            db,
-            github_username=username,
-            analysis_id=saved_analysis.id,
-            success=True,
-            duration_ms=duration,
-        )
-
-        return {
-            "username": username,
-            "cached": False,
-            "analysis": analysis,
-        }
-
-    except Exception as e:
-        duration = int(
-            (time.perf_counter() - start)
-            * 1000
-        )
-
-        # 如果上面的exception抓到其中一个：GitHub 挂了，LLM 挂了。
-        await AnalysisRequestLogCRUD.create( # 这里仍然会记录/保存失败日志。然后在下面的raise error返回500。除了Database 挂了的话，就保存不到数据进去database。
-            db,
-            github_username=username,
-            analysis_id=None,
-            success=False,
-            duration_ms=duration,
-            error_message=str(e),
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(e),
-        )
-
-
-# - Workflow -
-
-# Request
-#     ↓
-# Endpoint
-#     ↓
-# GitHubAnalysisCRUD.get_by_username() （Check Cache）
-#     ↓
-# Cache Hit?
-#   /     \
-#  yes    no
-#   |      |
-# return   GitHubService（GitHub API）
-#          ↓
-#          LLMService
-#          ↓
-#          GitHubAnalysisCRUD.create() （Save Analysis）
-#          ↓
-#          AnalysisRequestLogCRUD.create() （Save Log）
-#          ↓
-#          return
+    except OptionalAgentError as exc:
+        # 主分析已完成；HTTP 200 响应中仍保留分析结果。
+        return optional_agent_response(exc)
+    except SQLAlchemyError as exc:
+        # Keep SQL/driver details in server logs; the HTTP response stays sanitized.
+        logger.exception("Database operation failed during GitHub analysis")
+        raise to_http_exception(exc) from exc
+    except Exception as exc:
+        raise to_http_exception(exc) from exc
