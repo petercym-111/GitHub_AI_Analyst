@@ -5,7 +5,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimi
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions import (
-    AgentLoopLimitError, EmptyModelResponseError, InvalidModelResponseError,
+    AgentExecutionError, AgentLoopLimitError, EmptyModelResponseError, InvalidModelResponseError,
     OptionalAgentError, ToolArgumentError, ToolExecutionError,
     ToolTimeoutError, UnknownToolError,
 )
@@ -47,7 +47,15 @@ def to_http_exception(error: Exception) -> HTTPException:
 
 def optional_agent_response(error: OptionalAgentError) -> dict:
     # Core work succeeded: keep HTTP 200 and expose the specific optional error.
-    detail = to_http_exception(error.cause).detail
+    cause = error.cause
+    documents = error.documents
+    if isinstance(cause, AgentExecutionError):
+        documents = cause.documents
+        cause = cause.cause
+    detail = to_http_exception(cause).detail
     if detail["code"] == "INTERNAL_ERROR":
         detail = {"code": "AGENT_EXECUTION_ERROR", "message": "Additional task failed."}
-    return {**error.endpoint_result, "agent_error": detail}
+    response = {**error.endpoint_result, "agent_error": detail}
+    if documents:
+        response["agent"] = {"documents": documents}
+    return response

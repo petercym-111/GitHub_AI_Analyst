@@ -1,8 +1,12 @@
+import hashlib
 import json
+
+from pydantic import ValidationError
 
 from app.exceptions import InvalidModelResponseError
 
 from app.prompts.github_analysis import SYSTEM_PROMPT, USER_PROMPT
+from app.schemas.github_analysis import GitHubAnalysisSchema
 from app.services.llm_service import LLMService
 
 
@@ -42,9 +46,16 @@ async def analyze_repositories(
     )
 
     try:
-        analysis = json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise InvalidModelResponseError("Analysis is not valid JSON") from exc
-    if not isinstance(analysis, dict):
-        raise InvalidModelResponseError("Analysis must be a JSON object")
-    return analysis
+        analysis = GitHubAnalysisSchema.model_validate_json(content)
+    except ValidationError as exc:
+        raise InvalidModelResponseError("Analysis does not match its schema") from exc
+    return analysis.model_dump()
+
+
+def get_analysis_version(model_name: str) -> str:
+    """Invalidate cached analyses when the model, prompt, or input scope changes."""
+    version_source = "\n".join((model_name, SYSTEM_PROMPT, USER_PROMPT, "repos:first-page:30"))
+    return hashlib.sha256(version_source.encode("utf-8")).hexdigest() # SHA-256 是 256 位，也就是 64 个十六进制字符,十六进制哈希值
+    # 程序把 model_name、prompt 和输入范围组合成一个固定长度的指纹，保存并比较它。
+    # 这样数据库查询只需比较一个短字段例如“6473da0dbd20be386449792b58724bc8b2f6d0232b074e94b8315190c4d3a449”，
+    # 就能判断当前配置是否与生成缓存时一致；不用保存整份配置来做匹配。

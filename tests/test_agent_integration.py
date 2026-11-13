@@ -5,13 +5,16 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 import httpx
 from openai import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 from sqlalchemy.exc import SQLAlchemyError
 
 # Offline tests: never contact the real GitHub, model provider or database.
-os.environ.update(github_token="test", GROQ_API_KEY="test", DATABASE_URL="sqlite://")
+os.environ.update(github_token="test", GROQ_API_KEY="test", DATABASE_URL="postgresql+asyncpg://test:test@localhost/test")
+
+from app.configurations.config import settings
 
 from fastapi.testclient import TestClient
 from docx import Document
@@ -24,7 +27,7 @@ from app.services.agent_service import AgentService
 from app.services.tool_executor import ToolExecutor
 from app.clients.word_doc_client import WordClient
 from app.services import github_workflow_service as analysis_route
-from app.exceptions import (AgentLoopLimitError, EmptyModelResponseError,
+from app.exceptions import (AgentExecutionError, AgentLoopLimitError, EmptyModelResponseError,
                             InvalidModelResponseError, ToolArgumentError,
                             ToolExecutionError, ToolTimeoutError, UnknownToolError)
 from app.services.tool_registry import TOOL_REGISTRY, ToolDefinition
@@ -32,13 +35,21 @@ from app.services.tool_registry import WeatherArguments
 from app.services.tool.tool_schemas import TOOLS
 
 
+VALID_ANALYSIS = {
+    "overall_profile": "Python projects",
+    "main_technologies": ["Python"],
+    "project_categories": ["API"],
+    "repository_quality": ["Clear structure"],
+    "learning_recommendations": ["Add tests"],
+}
+
 class RouteTests(unittest.TestCase):
     def setUp(self):
         self.github = SimpleNamespace(get_user_repos=AsyncMock(return_value=[{"name": "demo"}]),
                                       get_user=AsyncMock(return_value={"login": "me"}))
         self.llm = LLMService()
         self.llm.client = SimpleNamespace(responses=SimpleNamespace(
-            create=AsyncMock(return_value=SimpleNamespace(output_text='{"summary":"ok"}'))))
+            create=AsyncMock(return_value=SimpleNamespace(output_text=json.dumps(VALID_ANALYSIS)))))
         self.agent = AgentService()
         self.agent.run = AsyncMock(return_value={"answer": "done", "documents": []})
         app.dependency_overrides.update({get_github_service: lambda: self.github,
@@ -81,18 +92,54 @@ class RouteTests(unittest.TestCase):
                 with self.subTest(cached=cached, message=message):
                     self.agent.run.reset_mock()
                     self.llm.client.responses.create.reset_mock()
-                    value = SimpleNamespace(id=1, analysis={"summary": "ok"}) if cached else None
+                    value = SimpleNamespace(id=1, analysis=VALID_ANALYSIS, analysis_version="current") if cached else None
                     with patch.object(analysis_route.GitHubAnalysisCRUD, "get_by_username", AsyncMock(return_value=value)), \
                          patch.object(analysis_route.GitHubAnalysisCRUD, "create", AsyncMock(return_value=SimpleNamespace(id=1))), \
                          patch.object(analysis_route.AnalysisRequestLogCRUD, "create", AsyncMock()):
                         response = self.client.post("/github/users/test/analysis", params={"message": message})
                     self.assertEqual(response.status_code, 200, response.text)
-                    self.assertEqual(response.json()["analysis"], {"summary": "ok"})
+                    self.assertEqual(response.json()["analysis"], VALID_ANALYSIS)
                     self.assertEqual(response.json()["cached"], cached)
                     self.assertEqual(self.agent.run.await_count, int(bool(message)))
                     self.assertEqual(self.llm.client.responses.create.await_count, int(not cached))
                     if not cached:
                         self.assertNotIn("tools", self.llm.client.responses.create.call_args.kwargs)
+                    self.assertEqual(
+                        analysis_route.GitHubAnalysisCRUD.get_by_username.call_args.kwargs["analysis_version"],
+                        analysis_route.get_analysis_version(self.llm.MODEL_NAME),
+                    )
+                    cutoff = analysis_route.GitHubAnalysisCRUD.get_by_username.call_args.kwargs["created_after"]
+                    self.assertGreater(
+                        cutoff,
+                        datetime.now(timezone.utc) - timedelta(
+                            seconds=settings.ANALYSIS_CACHE_TTL_SECONDS + 5
+                        ),
+                    )
+
+    def test_analysis_version_tracks_model_and_prompts(self):
+        original = analysis_route.get_analysis_version(self.llm.MODEL_NAME)
+        self.assertNotEqual(analysis_route.get_analysis_version("different-model"), original)
+        with patch("app.services.github_analysis_service.SYSTEM_PROMPT", "changed prompt"):
+            self.assertNotEqual(analysis_route.get_analysis_version(self.llm.MODEL_NAME), original)
+
+    def test_log_failure_does_not_discard_cached_analysis(self):
+        with patch.object(analysis_route.GitHubAnalysisCRUD, "get_by_username", AsyncMock(
+                return_value=SimpleNamespace(id=1, analysis=VALID_ANALYSIS))), \
+             patch.object(analysis_route.AnalysisRequestLogCRUD, "create", AsyncMock(
+                 side_effect=SQLAlchemyError("log unavailable"))), \
+             self.assertLogs("app.services.github_workflow_service", level="ERROR"):
+            response = self.client.post("/github/users/test/analysis")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["analysis"], VALID_ANALYSIS)
+
+    def test_optional_failure_returns_already_created_documents(self):
+        documents = [{"filename": "report.docx", "path": "generated_documents/report.docx"}]
+        self.agent.run.side_effect = AgentExecutionError(RuntimeError("model unavailable"), documents)
+        with self.assertLogs("app.services.github_workflow_service", level="ERROR"):
+            response = self.client.post("/github/users/test/repos", params={"message": "create Word"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["agent"]["documents"], documents)
+        self.assertEqual(response.json()["agent_error"]["code"], "AGENT_EXECUTION_ERROR")
 
     def test_agent_failure_preserves_repos(self):
         self.agent.run.side_effect = RuntimeError("tool failed")
@@ -105,12 +152,12 @@ class RouteTests(unittest.TestCase):
     def test_agent_failure_preserves_cached_analysis(self):
         self.agent.run.side_effect = RuntimeError("tool failed")
         with patch.object(analysis_route.GitHubAnalysisCRUD, "get_by_username", AsyncMock(
-                return_value=SimpleNamespace(id=1, analysis={"summary": "ok"}))), \
+                return_value=SimpleNamespace(id=1, analysis=VALID_ANALYSIS, analysis_version="current"))), \
              patch.object(analysis_route.AnalysisRequestLogCRUD, "create", AsyncMock()) as log, \
              self.assertLogs("app.services.github_workflow_service", level="ERROR"):
             response = self.client.post("/github/users/test/analysis", params={"message": "Word"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["analysis"], {"summary": "ok"})
+        self.assertEqual(response.json()["analysis"], VALID_ANALYSIS)
         self.assertIn("agent_error", response.json())
         self.assertTrue(log.call_args.kwargs["success"])
 
@@ -186,6 +233,38 @@ def call(name, arguments, call_id):
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_crud_uses_async_session_operations_and_cache_filters(self):
+        from sqlalchemy.dialects import postgresql
+
+        from app.crud.github_analysis import GitHubAnalysisCRUD
+
+        cached = SimpleNamespace(id="id", analysis=VALID_ANALYSIS)
+        db = SimpleNamespace(
+            add=Mock(),
+            execute=AsyncMock(return_value=SimpleNamespace(
+                scalar_one_or_none=lambda: cached
+            )),
+            commit=AsyncMock(),
+            refresh=AsyncMock(),
+        )
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        found = await GitHubAnalysisCRUD.get_by_username(
+            db, "octocat", created_after=cutoff, analysis_version="version"
+        )
+        self.assertIs(found, cached)
+        db.execute.assert_awaited_once()
+        query = str(db.execute.call_args.args[0].compile(dialect=postgresql.dialect()))
+        self.assertIn("analysis_version", query)
+        self.assertIn("created_at", query)
+
+        saved = await GitHubAnalysisCRUD.create(
+            db, github_username="octocat", repo_snapshot=[], analysis=VALID_ANALYSIS,
+            model_name="model", analysis_version="version",
+        )
+        self.assertEqual(saved.analysis_version, "version")
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(saved)
+
     def test_advertised_schemas_match_server_validation(self):
         # Explicit JSON schemas and Pydantic validation must accept the same shape.
         def constraints(value):
@@ -233,13 +312,15 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent = AgentService()
         agent.client = SimpleNamespace(responses=SimpleNamespace(create=AsyncMock(
             return_value=SimpleNamespace(output=[], output_text=""))))
-        with self.assertRaisesRegex(EmptyModelResponseError, "empty"):
+        with self.assertRaises(AgentExecutionError) as caught:
             await agent.run(message="hello", endpoint_result={})
+        self.assertIsInstance(caught.exception.cause, EmptyModelResponseError)
         agent.client.responses.create.return_value = SimpleNamespace(
             output=[call("get_weather", {}, "w")], output_text="")
         agent.tool_executor.execute = AsyncMock(return_value={"type": "function_call_output", "call_id": "w", "output": "{}"})
-        with self.assertRaisesRegex(AgentLoopLimitError, "maximum"):
+        with self.assertRaises(AgentExecutionError) as caught:
             await agent.run(message="weather", endpoint_result={})
+        self.assertIsInstance(caught.exception.cause, AgentLoopLimitError)
         self.assertEqual(agent.tool_executor.execute.await_count, agent.MAX_ITERATIONS)
 
     async def test_tool_validation(self):
@@ -272,10 +353,29 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_analysis_output(self):
         from app.services.github_analysis_service import analyze_repositories
         llm = SimpleNamespace(generate_text=AsyncMock())
-        for content in ("not JSON", "[]"):
+        for content in ("not JSON", "[]", '{"overall_profile":"x"}'):
             llm.generate_text.return_value = content
             with self.assertRaises(InvalidModelResponseError):
                 await analyze_repositories([], llm)
+
+    async def test_documents_survive_a_later_model_failure(self):
+        agent = AgentService()
+        word_call = call("create_doc_word", {"content": "report", "filename": "report.docx"}, "doc")
+        agent.client = SimpleNamespace(responses=SimpleNamespace(create=AsyncMock(
+            side_effect=[
+                SimpleNamespace(output=[word_call], output_text=""),
+                RuntimeError("model unavailable"),
+            ]
+        )))
+        document = {"filename": "report.docx", "path": "generated_documents/report.docx"}
+        agent.tool_executor.execute = AsyncMock(return_value={
+            "type": "function_call_output", "call_id": "doc",
+            "output": json.dumps(document),
+        })
+        with self.assertRaises(AgentExecutionError) as caught:
+            await agent.run(message="export", endpoint_result={})
+        self.assertEqual(caught.exception.documents, [document])
+        self.assertIsInstance(caught.exception.cause, RuntimeError)
 
 
 if __name__ == "__main__":

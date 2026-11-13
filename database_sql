@@ -3,6 +3,8 @@
 - 5 indexes
 - 1 foreign key
 - JSONB snapshot storage
+- JSONB analysis output storage
+- analysis_version invalidates cached analyses when the model, prompt, or input scope changes
 - UUID primary keys
 - audit logging relationship
 
@@ -15,9 +17,11 @@ CREATE TABLE github_analysis (
 
     repo_snapshot JSONB NOT NULL,
 
-    analysis TEXT NOT NULL,
+    analysis JSONB NOT NULL,
 
     model_name VARCHAR(100) NOT NULL,
+
+    analysis_version VARCHAR(64) NOT NULL,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

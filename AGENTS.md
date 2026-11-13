@@ -53,7 +53,7 @@
 | `app/clients/` | Groq 模型 client、天气 API client、Word 文件生成 |
 | `app/prompts/` | analysis 与 Agent 的 prompts |
 | `app/configurations/` | settings 与共享 HTTP client dependency |
-| `app/database/`、`app/models/`、`app/crud/` | engine / Session、ORM models、数据库读写 |
+| `app/database/`、`app/models/`、`app/crud/` | async engine / AsyncSession、ORM models、异步数据库读写 |
 | `app/schemas/github_analysis.py` | 分析结果的 Pydantic schema 定义 |
 | `tests/test_agent_integration.py` | 基于 unittest、AsyncMock、TestClient 的离线测试 |
 | `generated_documents/` | Word 输出目录；已有文件可能是用户产物 |
@@ -102,7 +102,7 @@ analysis:
 - 沿用现有依赖注入和资源复用方式。新建长期共享 client 时明确初始化与关闭责任，不把 request history 放进共享 client。
 - 使用清晰的 type hints 与项目兼容的 Pydantic v2 API，例如 `model_validate_json()`、`model_dump()`、`SettingsConfigDict`。
 - `async def` 不会自动将同步操作变为非阻塞。新增耗时网络、数据库或文件操作时，明确它是否阻塞 event loop。
-- 当前数据库使用同步 SQLAlchemy `Session`；不要在局部代码中随意混用 `AsyncSession`。迁移 async database stack 应作为明确任务处理。
+- 当前数据库使用 SQLAlchemy `AsyncSession` 与 PostgreSQL `asyncpg`；`DATABASE_URL` 必须使用兼容异步 driver 的 dialect（例如 `postgresql+asyncpg://...`）。
 - 数据库改动需要检查 ORM、实际 schema 与事务边界；不要只修改 Python type hint 就宣称数据库已迁移。
 - 不为假设中的扩展引入 BaseService、通用 repository framework、LangChain、消息队列、Redis、微服务或复杂插件体系；需要新增抽象时说明当前重复或真实需求。
 
@@ -155,8 +155,8 @@ git diff --check
 ```
 
 - `Settings()` 和数据库 engine 在模块 import 阶段构造；导入 app 也可能因缺少配置或 driver 失败。不要将 import failure 直接判断为业务逻辑错误。
-- PostgreSQL driver 和实际表结构需要与 `DATABASE_URL` 匹配；当前依赖文件没有显式列出 PostgreSQL driver，不能承诺仅安装 requirements 就能完成真实数据库启动。
-- 现有 tests 使用 SQLite URL 初始化 engine，但 mock 掉数据库操作；不验证 PostgreSQL JSONB、实际事务或 migration。
+- 当前异步数据库要求 `DATABASE_URL` 使用 `postgresql+asyncpg://...`，且 `requirements.txt` 已声明 `asyncpg`；`postgresql://...` 默认可能加载同步 driver 并触发 `AsyncEngine` 错误。真实连接和表结构仍需单独验证。
+- 现有 tests 使用假的 `postgresql+asyncpg` URL 并 mock 数据库操作；不会建立真实连接，也不验证 PostgreSQL JSONB、实际事务或 migration。
 - 改动业务行为时，执行相关测试；新增行为或修复缺陷时补充必要的 regression test。重点覆盖实际结果与边界，不写机械复制实现的测试。
 - 路由改动检查 method、Path / Query / Body、分页与错误结构；workflow 改动检查 cache hit / miss、空 message、主任务优先和 Agent 失败保留结果。
 - 工具改动检查 schema 一致性、无效参数、未知工具、timeout、循环上限及必要的文件输出行为。
@@ -176,10 +176,8 @@ git diff --check
 这些是编写时从代码发现的现状，不是要求本次全部修复的 backlog。处理相关模块时重新确认；解决后更新对应说明。
 
 - **分页 contract 冲突**：`endpoints.py` 使用 `per_page = Query(1, ge=1, le=1)`，但 `test_repos_message_keeps_paginated_data` 传入 `per_page=5`。先明确目标分页范围，再同步实现和测试；不能假定现有测试全通过。
-- **同步 database I/O**：CRUD methods 虽写成 `async def`，内部调用同步 Session。高并发下可能阻塞 event loop，当前不具备完整 async DB stack。
-- **SQL 参考与 ORM 不一致**：`database_sql` 将 `analysis` 写为 TEXT，ORM 使用 JSONB；该文件还包含说明性文本。不要直接作为 migration 执行，也不要据此断言真实数据库结构。
-- **分析 schema 尚未完整执行校验**：存在 `GitHubAnalysisSchema`，但分析流程目前只检查 JSON 可解析且为 object；JSON mode 本身不保证业务字段完整。
-- **缓存没有显式新鲜度策略**：当前按 username 取最新记录，没有 TTL 或模型 / prompt version 失效规则；`cached=true` 不保证数据仍与 GitHub 最新状态一致。
+- **现有数据库需要迁移**：部署前检查并应用 `migrations/0001_analysis_cache_version.sql`；其中合法 JSON 保持结构，非法历史文本会被保留为 JSON 字符串，旧记录仍标记为 `legacy`，不会命中新版本缓存。
+- **分析缓存 freshness**：TTL 默认 24 小时；模型、prompt 或第一页 30 个仓库的输入范围变化会更新版本指纹。它仍不会检测仓库在 24 小时内发生的即时变化。
 - **Provider 验证独立于离线测试**：仓库使用 Groq 的 Responses 调用，真实支持程度与可用模型必须单独验证，不能从 SDK 方法存在推断服务端支持。
 
 ## 12. 交付要求

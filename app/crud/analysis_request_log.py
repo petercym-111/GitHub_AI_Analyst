@@ -1,4 +1,6 @@
-from sqlalchemy.orm import Session
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analysis_request_log import (
     AnalysisRequestLog,
@@ -9,7 +11,7 @@ class AnalysisRequestLogCRUD:
 
     @staticmethod
     async def create(
-        db: Session,
+        db: AsyncSession,
         *, # 这个“*”代表后面的参数全部必须使用 keyword argument来传递
             #例如：github_username="torvalds",
             #     analysis_id=None,
@@ -17,7 +19,7 @@ class AnalysisRequestLogCRUD:
             #     duration_ms=512,
             #     error_message=None,
         github_username: str,
-        analysis_id: str | None,
+        analysis_id: UUID | None,
         success: bool,
         duration_ms: int,
         error_message: str | None = None,
@@ -33,7 +35,7 @@ class AnalysisRequestLogCRUD:
 
         db.add(obj)
 
-        db.commit()
-        db.refresh(obj)
+        await db.commit()
+        await db.refresh(obj)
 
         return obj

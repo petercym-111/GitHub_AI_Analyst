@@ -1,5 +1,6 @@
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     String,
@@ -7,13 +8,13 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    func,
 )
 
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.db_session import Base
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.github_analysis import GitHubAnalysis
@@ -23,7 +24,7 @@ class AnalysisRequestLog(Base):
     __tablename__ = "analysis_request_log"
 
     id: Mapped[UUID] = mapped_column(
-        UUID(as_uuid=True),
+        PostgreSQLUUID(as_uuid=True),
         primary_key=True,
         default=uuid4,
     )
@@ -34,7 +35,7 @@ class AnalysisRequestLog(Base):
     )
 
     analysis_id: Mapped[UUID | None] = mapped_column(
-        UUID(as_uuid=True),
+        PostgreSQLUUID(as_uuid=True),
         ForeignKey("github_analysis.id"),
         nullable=True,
     )
@@ -55,7 +56,7 @@ class AnalysisRequestLog(Base):
 
     requested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=datetime.utcnow,
+        server_default=func.now(),
     )
 
     analysis: Mapped["GitHubAnalysis | None"] = relationship(

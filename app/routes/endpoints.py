@@ -46,15 +46,18 @@ async def get_repos(
     page: int = Query(1, ge=1),
     per_page: int = Query(1, ge=1, le=1),
     message: str | None = Query(default=None, max_length=4000),
-    agent_service: AgentService = Depends(AgentService),
+    agent_service: AgentService = Depends(AgentService), # creating instance and send to get_repositories
     service: GitHubService = Depends(get_github_service),
 ):
     try:
+        # 1. 将仓库获取及可选 Agent 分支交给 workflow service 编排。
         return await get_repositories(
             username=username, page=page, per_page=per_page, message=message,
-            github_service=service, agent_service=agent_service,
+            github_service=service, agent_service=agent_service, # the endpoint act as a composition root here, so that the workflow can receive the instance instead of creating dependency
         )
     except OptionalAgentError as exc:
+        # 仓库获取已成功：保留仓库结果，并返回 Agent 错误信息。
         return optional_agent_response(exc)
     except Exception as exc:
+        # GitHub 主流程失败时转换为非 2xx HTTP 错误。
         raise to_http_exception(exc) from exc

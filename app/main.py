@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import httpx
 from contextlib import asynccontextmanager
 
+from app.database.db_session import engine
 from app.routes import endpoints as github
 from app.routes import github_analysis_endpoint as analysis
 
@@ -119,22 +120,13 @@ async def lifespan(app: FastAPI): # Defines a function that FastAPI will call to
         timeout=10.0, # if GitHub API does not respond within 10 seconds → abort request
     )
 
-    yield  # yield separates startup and shutdown phases. It pauses execution after initialization, lets FastAPI run the application normally,
-           # and only resumes when the server is shutting down — not after individual requests finish.
-           # app runs here = This is the boundary between startup and shutdown, without yield the app will not properly start serving requests.
-           # Everything before = startup
-           # Everything after = shutdown
-           # During yield:
-                # FastAPI is running normally (handling requests)
-
-    # Shutdown Section
-    await app.state.http_client.aclose()
-    # Properly closes the HTTP client
-    # Releases:
-         # - open TCP connections
-         # - sockets
-         # - connection pool
-    # Prevents resource leaks
+    try:
+        yield
+    finally:
+        try:
+            await app.state.http_client.aclose()
+        finally:
+            await engine.dispose()
 
 app = FastAPI(lifespan=lifespan)
 # - Creates the FastAPI application
